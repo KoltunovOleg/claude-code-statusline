@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1012" height="84" viewBox="0 0 1012 84" role="img" aria-label="Claude Code status line preview">
+<rect width="1012" height="84" rx="10" fill="#1e1e1e"/>
+<g font-family="Consolas, Menlo, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="15" xml:space="preserve">
+<text x="20.0" y="34" fill="#e06c75" textLength="54.0" lengthAdjust="spacingAndGlyphs">medium</text>
+<rect x="86.9" y="21" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="101.0" y="34" fill="#56b6c2" textLength="90.0" lengthAdjust="spacingAndGlyphs">Sonnet 4.6</text>
+<rect x="203.9" y="21" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="218.0" y="34" fill="#98c379" textLength="27.0" lengthAdjust="spacingAndGlyphs">ctx</text>
+<rect x="254.0" y="24" width="9.0" height="13" fill="#98c379"/>
+<rect x="263.0" y="24" width="63.0" height="13" fill="#485c49"/>
+<text x="335.0" y="34" fill="#98c379" textLength="162.0" lengthAdjust="spacingAndGlyphs">14% (28.0k/200.0k)</text>
+<rect x="509.9" y="21" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="524.0" y="34" fill="#61afef" textLength="45.0" lengthAdjust="spacingAndGlyphs">cache</text>
+<rect x="578.0" y="24" width="63.0" height="13" fill="#61afef"/>
+<rect x="641.0" y="24" width="9.0" height="13" fill="#355572"/>
+<text x="659.0" y="34" fill="#61afef" textLength="171.0" lengthAdjust="spacingAndGlyphs">r:20.0k (+3.0k new)</text>
+<rect x="842.9" y="21" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="857.0" y="34" fill="#e05561" textLength="135.0" lengthAdjust="spacingAndGlyphs">$0.12 (+$0.004)</text>
+<text x="20.0" y="64" fill="#c678dd" textLength="126.0" lengthAdjust="spacingAndGlyphs">cwd:my-project</text>
+<rect x="158.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="173.0" y="64" fill="#e5c07b" textLength="198.0" lengthAdjust="spacingAndGlyphs">git:feature/login-page</text>
+<rect x="383.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="398.0" y="64" fill="#8b929c" textLength="90.0" lengthAdjust="spacingAndGlyphs">sid:3f9a1c</text>
+<rect x="500.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="515.0" y="64" fill="#8b929c" textLength="117.0" lengthAdjust="spacingAndGlyphs">time: 12m 40s</text>
+<rect x="644.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="659.0" y="64" fill="#56b6c2" textLength="99.0" lengthAdjust="spacingAndGlyphs">last: 14.2s</text>
+</g>
+</svg>
