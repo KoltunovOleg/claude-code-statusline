@@ -183,6 +183,21 @@ if ($branch) { $parts2 += "${yellow}git:$branch$reset" }
 $parts2 += "${gray}sid:$shortSid$reset"
 $parts2 += "${gray}time: $durationStr$reset"
 if ($lastReqStr) { $parts2 += "${cyan}last: $lastReqStr$reset" }
+
+# Prompt cache state (Claude Code re-runs the status line when the cache expires)
+$pc = $data.prompt_cache
+if ($pc -and $pc.caching_observed -ne $false) {
+  if ($pc.warm -eq $true) {
+    $until = ''
+    if ($pc.expires_at) {
+      $until = ' until ' + [DateTimeOffset]::FromUnixTimeSeconds([long]$pc.expires_at).ToLocalTime().ToString('HH:mm')
+    }
+    $ttl = if ($pc.ttl) { " ($($pc.ttl))" } else { '' }
+    $parts2 += "${green}cache warm$until$ttl$reset"
+  } elseif ($pc.warm -eq $false) {
+    $parts2 += "${yellow}cache cold$reset"
+  }
+}
 $line2 = $parts2 -join ' | '
 
 Write-Output $line1

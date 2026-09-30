@@ -20,6 +20,7 @@ A two-line status line for [Claude Code](https://claude.com/claude-code) that sh
 | `sid` | Short session ID |
 | `time` | Session duration |
 | `last` | Duration of the last model request |
+| `cache warm until 14:32 (5m)` / `cache cold` | Whether the prompt cache is still warm, when it expires and its lifetime. When cold, the next request re-writes the cache and costs more |
 
 ## Install
 
@@ -92,6 +93,7 @@ Some values also depend on the session:
 - `medium` (effort) appears only when Claude Code reports an effort level.
 - `cache` shows `r:0` on the first request of a session, because everything is being written to the cache for the first time.
 - `last` appears after the first model request.
+- `cache warm` / `cache cold` needs Claude Code v2.1.251 or later and appears after the first model request. Claude Code refreshes the status line when the cache expires, so it switches to `cold` on its own.
 - Cost and timing are tracked with small files in the system temp folder (`claude_*`), which the OS cleans up over time.
 
 ## Uninstall

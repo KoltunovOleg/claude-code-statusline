@@ -34,6 +34,7 @@ fields=$(printf '%s' "$input" | tr '{},' '\n\n\n' | LC_ALL=C awk '
 sid=""; model_name=""; model_id=""; cwd=""; cwd_top=""; effort=""; effort_level=""
 total_cost=""; last_turn_cost=""; api_ms=""; ctx_size=""
 in_tok=""; cache_read=""; cache_new=""
+pc_warm=""; pc_exp=""; pc_ttl=""; pc_obs=""
 while IFS='=' read -r k v; do
   case "$k" in
     session_id) sid=$v ;;
@@ -50,6 +51,10 @@ while IFS='=' read -r k v; do
     input_tokens) in_tok=$v ;;
     cache_read_input_tokens) cache_read=$v ;;
     cache_creation_input_tokens) cache_new=$v ;;
+    warm) pc_warm=$v ;;
+    expires_at) pc_exp=$v ;;
+    ttl) pc_ttl=$v ;;
+    caching_observed) pc_obs=$v ;;
   esac
 done <<EOF
 $fields
@@ -99,12 +104,20 @@ if [ -n "$sid" ] && [ -n "$api_ms" ]; then
   last_api=$3
 fi
 
+# --- Prompt cache expiry as local HH:MM (GNU date, then BSD date) ----------
+pc_until=""
+case "$pc_exp" in
+  ''|*[!0-9]*) ;;
+  *) pc_until=$(date -d "@$pc_exp" +%H:%M 2>/dev/null || date -r "$pc_exp" +%H:%M 2>/dev/null) ;;
+esac
+
 # --- Render ------------------------------------------------------------------
 LC_ALL=C awk \
   -v effort="$effort" -v model="$model" -v folder="$folder" -v branch="$branch" -v sid="$sid" \
   -v total="${total_cost:-0}" -v last_turn="${last_turn_cost:-0}" -v prev="$prev_cost" \
   -v in_tok="${in_tok:-0}" -v cread="${cache_read:-0}" -v cnew="${cache_new:-0}" -v ctx_size="${ctx_size:-0}" \
-  -v duration="$duration" -v last_api="$last_api" '
+  -v duration="$duration" -v last_api="$last_api" \
+  -v pc_warm="$pc_warm" -v pc_until="$pc_until" -v pc_ttl="$pc_ttl" -v pc_obs="$pc_obs" '
 function rgb(r, g, b) { return sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 function tint(r, g, b) { return rgb(int(r*0.35 + 30*0.65 + 0.5), int(g*0.35 + 37*0.65 + 0.5), int(b*0.35 + 48*0.65 + 0.5)) }
 function rep(s, n,   out, i) { out = ""; for (i = 0; i < n; i++) out = out s; return out }
@@ -169,6 +182,15 @@ BEGIN {
   l2[++n] = gray "sid:" short reset
   l2[++n] = gray "time: " dur reset
   if (lastq != "") l2[++n] = cyan "last: " lastq reset
+  # Prompt cache state (Claude Code re-runs the status line when the cache expires)
+  if (pc_obs != "false") {
+    if (pc_warm == "true") {
+      pc = "cache warm"
+      if (pc_until != "") pc = pc " until " pc_until
+      if (pc_ttl != "" && pc_ttl != "null") pc = pc " (" pc_ttl ")"
+      l2[++n] = green pc reset
+    } else if (pc_warm == "false") l2[++n] = yellow "cache cold" reset
+  }
   print join(l2, n)
 }'
 STATUSLINE_EOF

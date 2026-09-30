@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1012" height="84" viewBox="0 0 1012 84" role="img" aria-label="Claude Code status line preview">
-<rect width="1012" height="84" rx="10" fill="#1e1e1e"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1048" height="84" viewBox="0 0 1048 84" role="img" aria-label="Claude Code status line preview">
+<rect width="1048" height="84" rx="10" fill="#1e1e1e"/>
 <g font-family="Consolas, Menlo, 'DejaVu Sans Mono', 'Courier New', monospace" font-size="15" xml:space="preserve">
 <text x="20.0" y="34" fill="#e06c75" textLength="54.0" lengthAdjust="spacingAndGlyphs">medium</text>
 <rect x="86.9" y="21" width="1.2" height="17" fill="#6b6b6b"/>
@@ -25,5 +25,7 @@
 <text x="515.0" y="64" fill="#8b929c" textLength="117.0" lengthAdjust="spacingAndGlyphs">time: 12m 40s</text>
 <rect x="644.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
 <text x="659.0" y="64" fill="#56b6c2" textLength="99.0" lengthAdjust="spacingAndGlyphs">last: 14.2s</text>
+<rect x="770.9" y="51" width="1.2" height="17" fill="#6b6b6b"/>
+<text x="785.0" y="64" fill="#98c379" textLength="243.0" lengthAdjust="spacingAndGlyphs">cache warm until 14:32 (5m)</text>
 </g>
 </svg>
