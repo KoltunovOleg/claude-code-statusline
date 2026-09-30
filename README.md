@@ -1,5 +1,10 @@
 # Claude Code Status Line
 
+[![Release](https://img.shields.io/github/v/release/KoltunovOleg/claude-code-statusline)](https://github.com/KoltunovOleg/claude-code-statusline/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207-5391FE?logo=powershell&logoColor=white)
+
 A two-line status line for [Claude Code](https://claude.com/claude-code) that shows the model, context usage, cache, cost, git branch and timing, plus a one-file installer for Windows, macOS and Linux.
 
 ![Status line preview](preview.svg)
@@ -19,6 +24,24 @@ A two-line status line for [Claude Code](https://claude.com/claude-code) that sh
 ## Install
 
 Requires Claude Code and PowerShell. PowerShell is built into Windows. On macOS install it once with `brew install powershell`.
+
+### Quick install
+
+Downloads the installer to a temp folder and runs it. It still shows a preview and asks before changing anything.
+
+**Windows** (PowerShell)
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://raw.githubusercontent.com/KoltunovOleg/claude-code-statusline/main/install-statusline.ps1 -OutFile "$env:TEMP\install-statusline.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-statusline.ps1"
+```
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/KoltunovOleg/claude-code-statusline/main/install-statusline.ps1 -o /tmp/install-statusline.ps1 && pwsh -NoProfile -File /tmp/install-statusline.ps1
+```
+
+### Manual install
+
+Download `install-statusline.ps1` (or clone the repo), review it if you like, then run:
 
 **Windows**
 ```powershell
