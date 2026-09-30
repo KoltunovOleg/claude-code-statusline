@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/KoltunovOleg/claude-code-statusline)](https://github.com/KoltunovOleg/claude-code-statusline/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207-5391FE?logo=powershell&logoColor=white)
+![Shell](https://img.shields.io/badge/shell-PowerShell%20%7C%20bash-5391FE)
 
 A two-line status line for [Claude Code](https://claude.com/claude-code) that shows the model, context usage, cache, cost, git branch and timing, plus a one-file installer for Windows, macOS and Linux.
 
@@ -23,25 +23,30 @@ A two-line status line for [Claude Code](https://claude.com/claude-code) that sh
 
 ## Install
 
-Requires Claude Code and PowerShell. PowerShell is built into Windows. On macOS install it once with `brew install powershell`.
+Requires only Claude Code. Nothing else to install:
+
+| OS | Installer | Runs with |
+|---|---|---|
+| Windows | `install-statusline.ps1` | PowerShell (built into Windows) |
+| macOS / Linux | `install.sh` | bash (built into macOS and Linux) |
 
 ### Quick install
 
-Downloads the installer to a temp folder and runs it. It still shows a preview and asks before changing anything.
+Downloads the installer and runs it. It still shows a preview and asks before changing anything.
 
 **Windows** (PowerShell)
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://raw.githubusercontent.com/KoltunovOleg/claude-code-statusline/main/install-statusline.ps1 -OutFile "$env:TEMP\install-statusline.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-statusline.ps1"
 ```
 
-**macOS / Linux**
+**macOS / Linux** (terminal)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KoltunovOleg/claude-code-statusline/main/install-statusline.ps1 -o /tmp/install-statusline.ps1 && pwsh -NoProfile -File /tmp/install-statusline.ps1
+curl -fsSL https://raw.githubusercontent.com/KoltunovOleg/claude-code-statusline/main/install.sh | bash
 ```
 
 ### Manual install
 
-Download `install-statusline.ps1` (or clone the repo), review it if you like, then run:
+Download the installer for your OS (or clone the repo), review it if you like, then run:
 
 **Windows**
 ```powershell
@@ -50,23 +55,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-statusline.ps1
 
 **macOS / Linux**
 ```bash
-pwsh -NoProfile -File ./install-statusline.ps1
+bash install.sh
 ```
 
-Run it from a regular PowerShell or terminal window. Git Bash on Windows may not handle the y/n prompts.
+On Windows, run it from PowerShell or Windows Terminal. Git Bash may not handle the y/n prompts.
 
 ### What the installer does
 
 1. Checks that Claude Code is installed. If it isn't, it stops without creating anything.
-2. If `~/.claude/statusline.ps1` already exists, warns you and asks before replacing it. **No backup is made**, so copy the file yourself first if you want to keep it.
+2. If the status line script already exists, warns you and asks before replacing it. **No backup is made**, so copy the file yourself first if you want to keep it.
 3. Shows a preview with sample data and asks whether to continue.
 4. Writes the status line and runs a check to show the result.
+
+If `settings.json` has an unexpected format, the macOS / Linux installer changes nothing and prints the snippet to add manually.
 
 ### Where it installs
 
 | File | Change |
 |---|---|
-| `~/.claude/statusline.ps1` | The status line script |
+| `~/.claude/statusline.ps1` (Windows) or `~/.claude/statusline.sh` (macOS / Linux) | The status line script |
 | `~/.claude/settings.json` | Only the `statusLine` entry is set. Other settings are kept. |
 
 These are user-level settings, so the status line applies to **all projects** on the machine. Start a new Claude Code session to see it.
@@ -89,7 +96,7 @@ Some values also depend on the session:
 
 ## Uninstall
 
-Remove the `statusLine` entry from `~/.claude/settings.json` (or restore your own backup) and delete `~/.claude/statusline.ps1`.
+Remove the `statusLine` entry from `~/.claude/settings.json` (or restore your own backup) and delete `~/.claude/statusline.ps1` (Windows) or `~/.claude/statusline.sh` (macOS / Linux).
 
 ## License
 
