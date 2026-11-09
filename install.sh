@@ -23,42 +23,106 @@ input=$(cat)
 [ -z "${input//[[:space:]]/}" ] && exit 0
 
 # --- Parse JSON --------------------------------------------------------------
-# Flatten objects onto separate lines and take the first value of each key.
-fields=$(printf '%s' "$input" | tr '{},' '\n\n\n' | LC_ALL=C awk '
-  {
-    line = $0
-    sub(/^[ \t\r]+/, "", line)
-    if (line !~ /^"[A-Za-z_]+"[ \t]*:/) next
-    k = line; sub(/"[ \t]*:.*/, "", k); sub(/^"/, "", k)
-    v = line; sub(/^"[^"]*"[ \t]*:[ \t]*/, "", v); sub(/[ \t\r]+$/, "", v)
-    if (v ~ /^"/) { sub(/^"/, "", v); sub(/"$/, "", v) }
-    if (v != "" && !(k in seen)) { seen[k] = 1; print k "=" v }
+# Prints one "path=value" line per scalar inside objects, e.g.
+# "model.display_name=Opus". Values inside arrays and nulls are skipped.
+# Control characters are removed from strings, so a value can never start a new
+# line here or send escape sequences to the terminal.
+fields=$(printf '%s' "$input" | LC_ALL=C awk '
+  function clean(s) {
+    gsub(/[\001-\037\177]/, "", s)
+    gsub(/\302[\200-\237]/, "", s)   # C1 control characters (U+0080-U+009F) in UTF-8
+    return s
+  }
+  function hexval(h,   k, v) {
+    v = 0
+    for (k = 1; k <= 4; k++) v = v * 16 + index("0123456789abcdef", tolower(substr(h, k, 1))) - 1
+    return v
+  }
+  function read_string(   out, c, cp) {
+    out = ""; i++
+    while (i <= n) {
+      c = substr(S, i, 1)
+      if (c == "\"") { i++; return clean(out) }
+      if (c == "\\") {
+        c = substr(S, i + 1, 1); i += 2
+        if (c == "u") {
+          cp = hexval(substr(S, i, 4)); i += 4
+          if (cp >= 32 && cp < 127) out = out sprintf("%c", cp)
+          else if (cp >= 160) out = out "?"   # non-ASCII arrives unescaped from Claude Code
+        }
+        else if (c == "n" || c == "t" || c == "r") out = out " "
+        else if (c == "\"" || c == "\\" || c == "/") out = out c
+        continue
+      }
+      out = out c; i++
+    }
+    return clean(out)
+  }
+  # Dotted path of the current value, or "" if it is inside an array or a key is unusual
+  function path(   k, p) {
+    if (d < 1) return ""
+    p = ""
+    for (k = 1; k <= d; k++) {
+      if (typ[k] != "{" || key[k] !~ /^[A-Za-z0-9_]+$/) return ""
+      p = (k == 1) ? key[k] : p "." key[k]
+    }
+    return p
+  }
+  function emit(v,   p) {
+    p = path()
+    if (p != "" && !(p in seen)) { seen[p] = 1; print p "=" v }
+  }
+  { S = S $0 "\n" }
+  END {
+    n = length(S); i = 1; d = 0
+    while (i <= n) {
+      c = substr(S, i, 1)
+      if (c == "{" || c == "[") { d++; typ[d] = c; key[d] = ""; want_key[d] = (c == "{"); i++ }
+      else if (c == "}" || c == "]") { if (d > 0) d--; i++ }
+      else if (c == ",") { if (d > 0 && typ[d] == "{") want_key[d] = 1; i++ }
+      else if (c == ":" || c == " " || c == "\t" || c == "\r" || c == "\n") i++
+      else if (c == "\"") {
+        v = read_string()
+        if (d > 0 && typ[d] == "{" && want_key[d]) { key[d] = v; want_key[d] = 0 }
+        else emit(v)
+      } else {
+        j = i
+        while (j <= n && substr(S, j, 1) !~ /[],} \t\r\n]/) j++
+        v = clean(substr(S, i, j - i)); i = (j > i) ? j : i + 1
+        if (v != "null") emit(v)
+      }
+    }
   }')
 
 sid=""; model_name=""; model_id=""; cwd=""; cwd_top=""; effort=""; effort_level=""
-total_cost=""; last_turn_cost=""; api_ms=""; ctx_size=""
-in_tok=""; cache_read=""; cache_new=""
+total_cost=""; total_cost_alt=""; last_turn_cost=""; last_turn_cost_alt=""; api_ms=""; ctx_size=""
+in_tok=""; cache_read=""; cache_new=""; u_in_tok=""; u_cache_read=""; u_cache_new=""
 pc_warm=""; pc_exp=""; pc_ttl=""; pc_obs=""
 while IFS='=' read -r k v; do
   case "$k" in
     session_id) sid=$v ;;
-    display_name) model_name=$v ;;
-    id) model_id=$v ;;
-    current_dir) cwd=$v ;;
+    model.display_name) model_name=$v ;;
+    model.id) model_id=$v ;;
+    workspace.current_dir) cwd=$v ;;
     cwd) cwd_top=$v ;;
     effort) effort=$v ;;
-    level) effort_level=$v ;;
-    total_cost_usd|totalCost) [ -z "$total_cost" ] && total_cost=$v ;;
-    last_turn_cost_usd|lastTurnCost) [ -z "$last_turn_cost" ] && last_turn_cost=$v ;;
-    total_api_duration_ms) api_ms=$v ;;
-    context_window_size) ctx_size=$v ;;
-    input_tokens) in_tok=$v ;;
-    cache_read_input_tokens) cache_read=$v ;;
-    cache_creation_input_tokens) cache_new=$v ;;
-    warm) pc_warm=$v ;;
-    expires_at) pc_exp=$v ;;
-    ttl) pc_ttl=$v ;;
-    caching_observed) pc_obs=$v ;;
+    effort.level) effort_level=$v ;;
+    cost.total_cost_usd) total_cost=$v ;;
+    cost.totalCost) total_cost_alt=$v ;;
+    cost.last_turn_cost_usd) last_turn_cost=$v ;;
+    cost.lastTurnCost) last_turn_cost_alt=$v ;;
+    cost.total_api_duration_ms) api_ms=$v ;;
+    context_window.context_window_size) ctx_size=$v ;;
+    context_window.current_usage.input_tokens) in_tok=$v ;;
+    context_window.current_usage.cache_read_input_tokens) cache_read=$v ;;
+    context_window.current_usage.cache_creation_input_tokens) cache_new=$v ;;
+    usage.input_tokens) u_in_tok=$v ;;
+    usage.cache_read_input_tokens) u_cache_read=$v ;;
+    usage.cache_creation_input_tokens) u_cache_new=$v ;;
+    prompt_cache.warm) pc_warm=$v ;;
+    prompt_cache.expires_at) pc_exp=$v ;;
+    prompt_cache.ttl) pc_ttl=$v ;;
+    prompt_cache.caching_observed) pc_obs=$v ;;
   esac
 done <<EOF
 $fields
@@ -67,7 +131,15 @@ EOF
 [ -n "$effort_level" ] && effort=$effort_level
 model=${model_name:-${model_id:-Claude}}
 cwd=${cwd:-${cwd_top:-$PWD}}
-folder=$(basename "$cwd")
+folder=$(basename -- "$cwd")
+total_cost=${total_cost:-$total_cost_alt}
+last_turn_cost=${last_turn_cost:-$last_turn_cost_alt}
+# Older Claude Code versions send usage instead of context_window.current_usage
+if [ -z "$in_tok$cache_read$cache_new" ]; then
+  in_tok=$u_in_tok; cache_read=$u_cache_read; cache_new=$u_cache_new
+fi
+# The session id becomes part of temp file names, so allow only id characters
+case "$sid" in *[!A-Za-z0-9-]*) sid="" ;; esac
 tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
 
 branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -118,12 +190,19 @@ case "$pc_exp" in
 esac
 
 # --- Render ------------------------------------------------------------------
-LC_ALL=C awk \
-  -v effort="$effort" -v model="$model" -v folder="$folder" -v branch="$branch" -v sid="$sid" \
-  -v total="${total_cost:-0}" -v last_turn="${last_turn_cost:-0}" -v prev="$prev_cost" \
-  -v in_tok="${in_tok:-0}" -v cread="${cache_read:-0}" -v cnew="${cache_new:-0}" -v ctx_size="${ctx_size:-0}" \
-  -v duration="$duration" -v last_api="$last_api" -v cwd_own_line="$cwd_own_line" \
-  -v pc_warm="$pc_warm" -v pc_until="$pc_until" -v pc_ttl="$pc_ttl" -v pc_obs="$pc_obs" '
+# Values go through the environment, not awk -v, because -v turns backslash
+# sequences such as \033 in a folder name into real control characters.
+SL_EFFORT=$effort SL_MODEL=$model SL_FOLDER=$folder SL_BRANCH=$branch SL_SID=$sid \
+SL_TOTAL=${total_cost:-0} SL_LAST_TURN=${last_turn_cost:-0} SL_PREV=$prev_cost \
+SL_IN_TOK=${in_tok:-0} SL_CREAD=${cache_read:-0} SL_CNEW=${cache_new:-0} SL_CTX_SIZE=${ctx_size:-0} \
+SL_DURATION=$duration SL_LAST_API=$last_api SL_CWD_OWN_LINE=$cwd_own_line \
+SL_PC_WARM=$pc_warm SL_PC_UNTIL=$pc_until SL_PC_TTL=$pc_ttl SL_PC_OBS=$pc_obs \
+LC_ALL=C awk '
+function clean(s) {
+  gsub(/[\001-\037\177]/, "", s)
+  gsub(/\302[\200-\237]/, "", s)
+  return s
+}
 function rgb(r, g, b) { return sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 function tint(r, g, b) { return rgb(int(r*0.35 + 30*0.65 + 0.5), int(g*0.35 + 37*0.65 + 0.5), int(b*0.35 + 48*0.65 + 0.5)) }
 function rep(s, n,   out, i) { out = ""; for (i = 0; i < n; i++) out = out s; return out }
@@ -135,6 +214,15 @@ function bar(ratio, color, track,   f) {
 function fk(n) { return (n >= 1000) ? sprintf("%.1fk", n / 1000) : sprintf("%d", n) }
 function join(arr, n,   s, i) { s = arr[1]; for (i = 2; i <= n; i++) s = s " | " arr[i]; return s }
 BEGIN {
+  effort = clean(ENVIRON["SL_EFFORT"]); model = clean(ENVIRON["SL_MODEL"])
+  folder = clean(ENVIRON["SL_FOLDER"]); branch = clean(ENVIRON["SL_BRANCH"]); sid = ENVIRON["SL_SID"]
+  total = ENVIRON["SL_TOTAL"]; last_turn = ENVIRON["SL_LAST_TURN"]; prev = ENVIRON["SL_PREV"]
+  in_tok = ENVIRON["SL_IN_TOK"] + 0; cread = ENVIRON["SL_CREAD"] + 0; cnew = ENVIRON["SL_CNEW"] + 0
+  ctx_size = ENVIRON["SL_CTX_SIZE"]; duration = ENVIRON["SL_DURATION"] + 0; last_api = ENVIRON["SL_LAST_API"] + 0
+  cwd_own_line = ENVIRON["SL_CWD_OWN_LINE"] + 0
+  pc_warm = ENVIRON["SL_PC_WARM"]; pc_until = clean(ENVIRON["SL_PC_UNTIL"])
+  pc_ttl = clean(ENVIRON["SL_PC_TTL"]); pc_obs = ENVIRON["SL_PC_OBS"]
+
   BLOCK = "\342\226\207"   # U+2587 lower seven eighths block
   cyan = rgb(86,182,194); magenta = rgb(198,120,221); yellow = rgb(229,192,123)
   blue = rgb(97,175,239); green = rgb(152,195,121); red = rgb(224,85,97)

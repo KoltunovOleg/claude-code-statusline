@@ -44,10 +44,16 @@ function Format-K($n) {
   return "$n"
 }
 
+# Remove control characters, so values from JSON cannot send escape sequences to the terminal
+function Remove-Control($s) {
+  if ($null -eq $s) { return $null }
+  return ([string]$s) -replace '[\t\r\n]', ' ' -replace '[\x00-\x1F\x7F-\x9F]', ''
+}
+
 $tmp = [System.IO.Path]::GetTempPath()
 
-# 1. Session ID
-$sid = if ($data.session_id) { [string]$data.session_id } else { 'unknown' }
+# 1. Session ID (part of temp file names, so allow only id characters)
+$sid = if ("$($data.session_id)" -match '^[A-Za-z0-9-]+$') { [string]$data.session_id } else { 'unknown' }
 $shortSid = if ($sid -ne 'unknown') { $sid.Substring(0, [math]::Min(6, $sid.Length)) } else { 'none' }
 
 # 2. Cost (total + last turn)
@@ -96,13 +102,14 @@ if ($sid -ne 'unknown') {
 
 # 4. Model, folder, git branch
 $model = if ($data.model.display_name) { $data.model.display_name } elseif ($data.model.id) { $data.model.id } else { 'Claude' }
+$model = Remove-Control $model
 $cwd = if ($data.workspace.current_dir) { $data.workspace.current_dir } else { (Get-Location).Path }
-$folder = Split-Path $cwd -Leaf
+$folder = Remove-Control (Split-Path $cwd -Leaf)
 
 $branch = ''
 try {
   $b = & git -C "$cwd" rev-parse --abbrev-ref HEAD 2>$null
-  if ($LASTEXITCODE -eq 0 -and $b) { $branch = "$b".Trim() }
+  if ($LASTEXITCODE -eq 0 -and $b) { $branch = Remove-Control ("$b".Trim()) }
 } catch {}
 
 # Long branch names push the last fields off screen, so keep the start only
@@ -148,6 +155,7 @@ $cacheDisplay = "cache $(Make-Bar $cacheRatio $blue $blueTrack) r:$(Format-K $ca
 
 # Line 1: effort | model | ctx | cache | cost
 $effort = if ($data.effort.level) { $data.effort.level } elseif ($data.effort -is [string]) { $data.effort } else { $null }
+$effort = Remove-Control $effort
 $pink = "$e[38;2;224;108;117m"
 
 $parts1 = @()
@@ -203,7 +211,7 @@ if ($pc -and $pc.caching_observed -ne $false) {
     if ($pc.expires_at) {
       $until = ' until ' + [DateTimeOffset]::FromUnixTimeSeconds([long]$pc.expires_at).ToLocalTime().ToString('HH:mm')
     }
-    $ttl = if ($pc.ttl) { " ($($pc.ttl))" } else { '' }
+    $ttl = if ($pc.ttl) { " ($(Remove-Control $pc.ttl))" } else { '' }
     $parts2 += "${green}cache warm$until$ttl$reset"
   } elseif ($pc.warm -eq $false) {
     $parts2 += "${yellow}cache cold$reset"
