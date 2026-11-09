@@ -250,6 +250,76 @@ function Get-StatusLineContent($cwdOnOwnLine, $maxBranch) {
 
 function Format-YesNo($value) { if ($value) { 'yes' } else { 'no' } }
 
+# --- settings.json editing (text based, so the rest of the file stays as it is) ---
+function Skip-JsonSpace($s, $i) {
+  while ($i -lt $s.Length -and " `t`r`n".IndexOf($s[$i]) -ge 0) { $i++ }
+  return $i
+}
+
+# $s[$i] is the opening quote; returns the position after the closing quote, or -1
+function Skip-JsonString($s, $i) {
+  for ($i++; $i -lt $s.Length; $i++) {
+    if ($s[$i] -eq '\') { $i++ }
+    elseif ($s[$i] -eq '"') { return $i + 1 }
+  }
+  return -1
+}
+
+# $s[$i] is the first character of a value; returns the position after it, or -1
+function Skip-JsonValue($s, $i) {
+  if ($i -ge $s.Length) { return -1 }
+  $c = $s[$i]
+  if ($c -eq '"') { return Skip-JsonString $s $i }
+  if ($c -eq '{' -or $c -eq '[') {
+    $depth = 0
+    while ($i -lt $s.Length) {
+      $c = $s[$i]
+      if ($c -eq '"') { $i = Skip-JsonString $s $i; if ($i -lt 0) { return -1 }; continue }
+      if ($c -eq '{' -or $c -eq '[') { $depth++ }
+      elseif ($c -eq '}' -or $c -eq ']') { $depth--; if ($depth -eq 0) { return $i + 1 } }
+      $i++
+    }
+    return -1
+  }
+  while ($i -lt $s.Length -and ",}] `t`r`n".IndexOf($s[$i]) -lt 0) { $i++ }
+  return $i
+}
+
+# Set the top-level "statusLine" value in settings.json text and keep everything else.
+# Returns $null if the text is not a JSON object that can be edited safely.
+function Set-StatusLineEntry($text, $valueJson) {
+  $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+  $valueJson = $valueJson -replace "`n", $nl
+  $i = Skip-JsonSpace $text 0
+  if ($i -ge $text.Length -or $text[$i] -ne '{') { return $null }
+  $open = $i
+  $i = Skip-JsonSpace $text ($i + 1)
+  while ($i -lt $text.Length -and $text[$i] -ne '}') {
+    if ($text[$i] -ne '"') { return $null }
+    $keyEnd = Skip-JsonString $text $i
+    if ($keyEnd -lt 0) { return $null }
+    $key = $text.Substring($i + 1, $keyEnd - $i - 2)
+    $i = Skip-JsonSpace $text $keyEnd
+    if ($i -ge $text.Length -or $text[$i] -ne ':') { return $null }
+    $valueStart = Skip-JsonSpace $text ($i + 1)
+    $valueEnd = Skip-JsonValue $text $valueStart
+    if ($valueEnd -lt 0) { return $null }
+    if ($key -eq 'statusLine') {
+      return $text.Substring(0, $valueStart) + $valueJson + $text.Substring($valueEnd)
+    }
+    $i = Skip-JsonSpace $text $valueEnd
+    if ($i -lt $text.Length -and $text[$i] -eq ',') { $i = Skip-JsonSpace $text ($i + 1) }
+  }
+  if ($i -ge $text.Length) { return $null }
+
+  # No statusLine yet: add it as the first entry
+  $entry = $nl + '  "statusLine": ' + $valueJson
+  if ($text.Substring($open + 1, $i - $open - 1).Trim() -eq '') {
+    return $text.Substring(0, $open + 1) + $entry + $nl + $text.Substring($i)
+  }
+  return $text.Substring(0, $open + 1) + $entry + ',' + $text.Substring($open + 1)
+}
+
 # PowerShell executable that runs this installer (pwsh or powershell)
 $PsExe = (Get-Process -Id $PID).Path
 
@@ -371,8 +441,13 @@ Write-Host "      shorten long git branch names: $(Format-YesNo ($maxBranch -gt 
 Write-Host "  - set statusLine in $settingsPath to:"
 Write-Host "      $command"
 
-# Warn if settings.json already points to a different status line
+# New statusLine value as JSON text
+$commandJson = $command.Replace('\', '\\').Replace('"', '\"')
+$statusLineJson = "{`n    `"type`": `"command`",`n    `"command`": `"$commandJson`"`n  }"
+
+# Prepare the new settings.json text now, so nothing is changed if it cannot be edited
 $settings = $null
+$newSettings = "{`n  `"statusLine`": $statusLineJson`n}`n"
 if (Test-Path $settingsPath) {
   $rawSettings = Get-Content $settingsPath -Raw -Encoding UTF8
   if (-not [string]::IsNullOrWhiteSpace($rawSettings)) {
@@ -382,8 +457,20 @@ if (Test-Path $settingsPath) {
       Write-Err "Could not read $settingsPath : the file contains invalid JSON."
       Stop-Install 'Fix settings.json and run the installer again. Nothing was changed.'
     }
+    $newSettings = Set-StatusLineEntry $rawSettings $statusLineJson
+    $edited = $null
+    if ($newSettings) { try { $edited = $newSettings | ConvertFrom-Json } catch {} }
+    if (-not $edited -or $edited.statusLine.command -ne $command) {
+      Write-Err "Could not safely edit $settingsPath (unexpected format)."
+      Write-Warn 'Nothing was changed. You can install manually: save the status line as ~/.claude/statusline.ps1'
+      Write-Warn 'and add this to settings.json:'
+      Write-Host "  `"statusLine`": $statusLineJson"
+      exit 1
+    }
   }
 }
+
+# Warn if settings.json already points to a different status line
 if ($settings -and $settings.statusLine -and $settings.statusLine.command -and $settings.statusLine.command -ne $command) {
   Write-Warn "  - the current statusLine will be replaced: $($settings.statusLine.command)"
 }
@@ -401,10 +488,7 @@ if (-not (Test-Path $claudeDir)) { New-Item -ItemType Directory -Path $claudeDir
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($statusLinePath, $content, $utf8NoBom)
 
-if (-not $settings) { $settings = New-Object PSObject }
-$statusLine = [pscustomobject]@{ type = 'command'; command = $command }
-$settings | Add-Member -NotePropertyName statusLine -NotePropertyValue $statusLine -Force
-[System.IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 100), $utf8NoBom)
+[System.IO.File]::WriteAllText($settingsPath, $newSettings, $utf8NoBom)
 
 Write-Ok 'Files written.'
 
