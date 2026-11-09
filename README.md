@@ -65,8 +65,13 @@ On Windows, run it from PowerShell or Windows Terminal. Git Bash may not handle 
 
 1. Checks that Claude Code is installed. If it isn't, it stops without creating anything.
 2. If the status line script already exists, warns you and asks before replacing it. **No backup is made**, so copy the file yourself first if you want to keep it.
-3. Shows a preview with sample data and asks whether to continue.
-4. Writes the status line and runs a check to show the result.
+3. Asks two optional layout questions (both default to no, which keeps the layout shown above):
+   - **Show the folder on a third line?** Moves `cwd` from the start of line 2 to its own line, so a long folder name does not push `last` and `cache warm` off screen.
+   - **Shorten long git branch names?** Branch names longer than 24 characters are cut to their first 24 characters, ending with `…`.
+4. Shows a preview with sample data and your chosen options, and asks whether to continue.
+5. Writes the status line and runs a check to show the result.
+
+To change these options later, run the installer again, or edit the `Options` lines at the top of the installed script.
 
 If `settings.json` has an unexpected format, the macOS / Linux installer changes nothing and prints the snippet to add manually.
 
@@ -92,13 +97,22 @@ Some values also depend on the session:
 
 - `medium` (effort) appears only when Claude Code reports an effort level.
 - `cache` shows `r:0` on the first request of a session, because everything is being written to the cache for the first time.
-- `last` appears after the first model request.
-- `cache warm` / `cache cold` needs Claude Code v2.1.251 or later and appears after the first model request. Claude Code refreshes the status line when the cache expires, so it switches to `cold` on its own.
+- `last` appears after the first model request.- `cache warm` / `cache cold` needs Claude Code v2.1.251 or later and appears after the first model request. Claude Code refreshes the status line when the cache expires, so it switches to `cold` on its own.
 - Cost and timing are tracked with small files in the system temp folder (`claude_*`), which the OS cleans up over time.
 
 ## Uninstall
 
 Remove the `statusLine` entry from `~/.claude/settings.json` (or restore your own backup) and delete `~/.claude/statusline.ps1` (Windows) or `~/.claude/statusline.sh` (macOS / Linux).
+
+## Tests
+
+The status line exists twice: in bash (inside `install.sh`) and in PowerShell (inside `install-statusline.ps1`). `tests/compare.sh` runs both on the JSON samples in `tests/fixtures` and checks that they print the expected lines and no stray control characters:
+
+```bash
+bash tests/compare.sh
+```
+
+It needs bash. PowerShell (`powershell` or `pwsh`) and gawk are used when installed. After an intended output change, run `bash tests/compare.sh --update` to rewrite the `.expected` files from the bash output, and review the diff before committing.
 
 ## License
 

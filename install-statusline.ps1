@@ -1,8 +1,10 @@
-# Claude Code status line installer (Windows, macOS, Linux)
+# Claude Code status line installer for Windows (PowerShell).
 #
-# Windows:        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-statusline.ps1
-# macOS / Linux:  pwsh -NoProfile -File ./install-statusline.ps1
-#                 (install PowerShell first on macOS: brew install powershell)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-statusline.ps1
+#
+# On macOS and Linux use install.sh instead (bash, nothing to install).
+# This script also runs there under PowerShell 7 if you already have it:
+#   pwsh -NoProfile -File ./install-statusline.ps1
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -11,6 +13,10 @@ $ErrorActionPreference = 'Stop'
 # Embedded status line (written to ~/.claude/statusline.ps1)
 # ---------------------------------------------------------------------------
 $StatusLineContent = @'
+# Options (set by the installer)
+$CwdOnOwnLine = $false   # $true: show the folder on a third line
+$MaxBranch    = 0        # above 0: shorten longer git branch names to this length
+
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -38,10 +44,16 @@ function Format-K($n) {
   return "$n"
 }
 
+# Remove control characters, so values from JSON cannot send escape sequences to the terminal
+function Remove-Control($s) {
+  if ($null -eq $s) { return $null }
+  return ([string]$s) -replace '[\t\r\n]', ' ' -replace '[\x00-\x1F\x7F-\x9F]', ''
+}
+
 $tmp = [System.IO.Path]::GetTempPath()
 
-# 1. Session ID
-$sid = if ($data.session_id) { [string]$data.session_id } else { 'unknown' }
+# 1. Session ID (part of temp file names, so allow only id characters)
+$sid = if ("$($data.session_id)" -match '^[A-Za-z0-9-]+$') { [string]$data.session_id } else { 'unknown' }
 $shortSid = if ($sid -ne 'unknown') { $sid.Substring(0, [math]::Min(6, $sid.Length)) } else { 'none' }
 
 # 2. Cost (total + last turn)
@@ -90,14 +102,18 @@ if ($sid -ne 'unknown') {
 
 # 4. Model, folder, git branch
 $model = if ($data.model.display_name) { $data.model.display_name } elseif ($data.model.id) { $data.model.id } else { 'Claude' }
+$model = Remove-Control $model
 $cwd = if ($data.workspace.current_dir) { $data.workspace.current_dir } else { (Get-Location).Path }
-$folder = Split-Path $cwd -Leaf
+$folder = Remove-Control (Split-Path $cwd -Leaf)
 
 $branch = ''
 try {
   $b = & git -C "$cwd" rev-parse --abbrev-ref HEAD 2>$null
-  if ($LASTEXITCODE -eq 0 -and $b) { $branch = "$b".Trim() }
+  if ($LASTEXITCODE -eq 0 -and $b) { $branch = Remove-Control ("$b".Trim()) }
 } catch {}
+
+# Long branch names push the last fields off screen, so keep the start only
+if ($MaxBranch -gt 0 -and $branch.Length -gt $MaxBranch) { $branch = $branch.Substring(0, $MaxBranch - 1) + [char]0x2026 }
 
 # 5. Context
 $u = $data.context_window.current_usage
@@ -139,6 +155,7 @@ $cacheDisplay = "cache $(Make-Bar $cacheRatio $blue $blueTrack) r:$(Format-K $ca
 
 # Line 1: effort | model | ctx | cache | cost
 $effort = if ($data.effort.level) { $data.effort.level } elseif ($data.effort -is [string]) { $data.effort } else { $null }
+$effort = Remove-Control $effort
 $pink = "$e[38;2;224;108;117m"
 
 $parts1 = @()
@@ -177,8 +194,10 @@ if ($sid -ne 'unknown' -and $apiTotal -gt 0) {
   }
 }
 
-# Line 2: cwd | git | sid | time | last
-$parts2 = @("${magenta}cwd:$folder$reset")
+# Line 2: cwd | git | sid | time | last (cwd goes to line 3 if $CwdOnOwnLine)
+$cwdPart = "${magenta}cwd:$folder$reset"
+$parts2 = @()
+if (-not $CwdOnOwnLine) { $parts2 += $cwdPart }
 if ($branch) { $parts2 += "${yellow}git:$branch$reset" }
 $parts2 += "${gray}sid:$shortSid$reset"
 $parts2 += "${gray}time: $durationStr$reset"
@@ -192,7 +211,7 @@ if ($pc -and $pc.caching_observed -ne $false) {
     if ($pc.expires_at) {
       $until = ' until ' + [DateTimeOffset]::FromUnixTimeSeconds([long]$pc.expires_at).ToLocalTime().ToString('HH:mm')
     }
-    $ttl = if ($pc.ttl) { " ($($pc.ttl))" } else { '' }
+    $ttl = if ($pc.ttl) { " ($(Remove-Control $pc.ttl))" } else { '' }
     $parts2 += "${green}cache warm$until$ttl$reset"
   } elseif ($pc.warm -eq $false) {
     $parts2 += "${yellow}cache cold$reset"
@@ -202,6 +221,7 @@ $line2 = $parts2 -join ' | '
 
 Write-Output $line1
 Write-Output $line2
+if ($CwdOnOwnLine) { Write-Output $cwdPart }
 '@
 
 # ---------------------------------------------------------------------------
@@ -226,6 +246,86 @@ function Stop-Install($msg) {
 function Format-Arg($value) {
   if ($value -match '\s') { return '"' + $value + '"' }
   return $value
+}
+
+# Status line script with the chosen options filled in
+function Get-StatusLineContent($cwdOnOwnLine, $maxBranch) {
+  $content = $StatusLineContent
+  if ($cwdOnOwnLine) { $content = $content.Replace('$CwdOnOwnLine = $false', '$CwdOnOwnLine = $true ') }
+  if ($maxBranch -gt 0) { $content = $content.Replace('$MaxBranch    = 0 ', '$MaxBranch    = ' + "$maxBranch".PadRight(2)) }
+  return $content
+}
+
+function Format-YesNo($value) { if ($value) { 'yes' } else { 'no' } }
+
+# --- settings.json editing (text based, so the rest of the file stays as it is) ---
+function Skip-JsonSpace($s, $i) {
+  while ($i -lt $s.Length -and " `t`r`n".IndexOf($s[$i]) -ge 0) { $i++ }
+  return $i
+}
+
+# $s[$i] is the opening quote; returns the position after the closing quote, or -1
+function Skip-JsonString($s, $i) {
+  for ($i++; $i -lt $s.Length; $i++) {
+    if ($s[$i] -eq '\') { $i++ }
+    elseif ($s[$i] -eq '"') { return $i + 1 }
+  }
+  return -1
+}
+
+# $s[$i] is the first character of a value; returns the position after it, or -1
+function Skip-JsonValue($s, $i) {
+  if ($i -ge $s.Length) { return -1 }
+  $c = $s[$i]
+  if ($c -eq '"') { return Skip-JsonString $s $i }
+  if ($c -eq '{' -or $c -eq '[') {
+    $depth = 0
+    while ($i -lt $s.Length) {
+      $c = $s[$i]
+      if ($c -eq '"') { $i = Skip-JsonString $s $i; if ($i -lt 0) { return -1 }; continue }
+      if ($c -eq '{' -or $c -eq '[') { $depth++ }
+      elseif ($c -eq '}' -or $c -eq ']') { $depth--; if ($depth -eq 0) { return $i + 1 } }
+      $i++
+    }
+    return -1
+  }
+  while ($i -lt $s.Length -and ",}] `t`r`n".IndexOf($s[$i]) -lt 0) { $i++ }
+  return $i
+}
+
+# Set the top-level "statusLine" value in settings.json text and keep everything else.
+# Returns $null if the text is not a JSON object that can be edited safely.
+function Set-StatusLineEntry($text, $valueJson) {
+  $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+  $valueJson = $valueJson -replace "`n", $nl
+  $i = Skip-JsonSpace $text 0
+  if ($i -ge $text.Length -or $text[$i] -ne '{') { return $null }
+  $open = $i
+  $i = Skip-JsonSpace $text ($i + 1)
+  while ($i -lt $text.Length -and $text[$i] -ne '}') {
+    if ($text[$i] -ne '"') { return $null }
+    $keyEnd = Skip-JsonString $text $i
+    if ($keyEnd -lt 0) { return $null }
+    $key = $text.Substring($i + 1, $keyEnd - $i - 2)
+    $i = Skip-JsonSpace $text $keyEnd
+    if ($i -ge $text.Length -or $text[$i] -ne ':') { return $null }
+    $valueStart = Skip-JsonSpace $text ($i + 1)
+    $valueEnd = Skip-JsonValue $text $valueStart
+    if ($valueEnd -lt 0) { return $null }
+    if ($key -eq 'statusLine') {
+      return $text.Substring(0, $valueStart) + $valueJson + $text.Substring($valueEnd)
+    }
+    $i = Skip-JsonSpace $text $valueEnd
+    if ($i -lt $text.Length -and $text[$i] -eq ',') { $i = Skip-JsonSpace $text ($i + 1) }
+  }
+  if ($i -ge $text.Length) { return $null }
+
+  # No statusLine yet: add it as the first entry
+  $entry = $nl + '  "statusLine": ' + $valueJson
+  if ($text.Substring($open + 1, $i - $open - 1).Trim() -eq '') {
+    return $text.Substring(0, $open + 1) + $entry + $nl + $text.Substring($i)
+  }
+  return $text.Substring(0, $open + 1) + $entry + ',' + $text.Substring($open + 1)
 }
 
 # PowerShell executable that runs this installer (pwsh or powershell)
@@ -305,7 +405,29 @@ if (Test-Path $statusLinePath) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Preview
+# 3. Option: folder on its own line
+# ---------------------------------------------------------------------------
+Write-Host ''
+Write-Info 'Option 1 of 2: folder on a separate line'
+Write-Host '  By default the folder (cwd) is the first field of line 2. A long folder name'
+Write-Host '  can push the last fields (last, cache warm/cold) off screen.'
+Write-Host '  Moving it to a third line keeps line 2 short.'
+$cwdOnOwnLine = Confirm-Step 'Show the folder on a third line?'
+
+# ---------------------------------------------------------------------------
+# 4. Option: shorten long git branch names
+# ---------------------------------------------------------------------------
+$BranchLimit = 24
+Write-Host ''
+Write-Info 'Option 2 of 2: shorten long git branch names'
+Write-Host "  Branch names longer than $BranchLimit characters can push the last fields off screen."
+Write-Host "  If shortened, only the first $BranchLimit characters are shown, ending with '...'."
+$maxBranch = if (Confirm-Step 'Shorten long git branch names?') { $BranchLimit } else { 0 }
+
+$content = Get-StatusLineContent $cwdOnOwnLine $maxBranch
+
+# ---------------------------------------------------------------------------
+# 5. Preview
 # ---------------------------------------------------------------------------
 Write-Host ''
 Write-Info 'Preview of the status line (sample data, not your real session):'
@@ -313,7 +435,7 @@ Write-Host ''
 
 $previewFile = Join-Path ([System.IO.Path]::GetTempPath()) ('statusline-preview-' + [guid]::NewGuid().ToString('N') + '.ps1')
 try {
-  [System.IO.File]::WriteAllText($previewFile, $StatusLineContent, (New-Object System.Text.UTF8Encoding $false))
+  [System.IO.File]::WriteAllText($previewFile, $content, (New-Object System.Text.UTF8Encoding $false))
   Invoke-StatusLine $previewFile | ForEach-Object { Write-Host "  $_" }
 } finally {
   Remove-Item $previewFile -Force -ErrorAction SilentlyContinue
@@ -322,11 +444,18 @@ try {
 Write-Host ''
 Write-Info 'What will be done:'
 Write-Host "  - write file: $statusLinePath"
+Write-Host "      folder on a third line: $(Format-YesNo $cwdOnOwnLine)"
+Write-Host "      shorten long git branch names: $(Format-YesNo ($maxBranch -gt 0))"
 Write-Host "  - set statusLine in $settingsPath to:"
 Write-Host "      $command"
 
-# Warn if settings.json already points to a different status line
+# New statusLine value as JSON text
+$commandJson = $command.Replace('\', '\\').Replace('"', '\"')
+$statusLineJson = "{`n    `"type`": `"command`",`n    `"command`": `"$commandJson`"`n  }"
+
+# Prepare the new settings.json text now, so nothing is changed if it cannot be edited
 $settings = $null
+$newSettings = "{`n  `"statusLine`": $statusLineJson`n}`n"
 if (Test-Path $settingsPath) {
   $rawSettings = Get-Content $settingsPath -Raw -Encoding UTF8
   if (-not [string]::IsNullOrWhiteSpace($rawSettings)) {
@@ -336,8 +465,20 @@ if (Test-Path $settingsPath) {
       Write-Err "Could not read $settingsPath : the file contains invalid JSON."
       Stop-Install 'Fix settings.json and run the installer again. Nothing was changed.'
     }
+    $newSettings = Set-StatusLineEntry $rawSettings $statusLineJson
+    $edited = $null
+    if ($newSettings) { try { $edited = $newSettings | ConvertFrom-Json } catch {} }
+    if (-not $edited -or $edited.statusLine.command -ne $command) {
+      Write-Err "Could not safely edit $settingsPath (unexpected format)."
+      Write-Warn 'Nothing was changed. You can install manually: save the status line as ~/.claude/statusline.ps1'
+      Write-Warn 'and add this to settings.json:'
+      Write-Host "  `"statusLine`": $statusLineJson"
+      exit 1
+    }
   }
 }
+
+# Warn if settings.json already points to a different status line
 if ($settings -and $settings.statusLine -and $settings.statusLine.command -and $settings.statusLine.command -ne $command) {
   Write-Warn "  - the current statusLine will be replaced: $($settings.statusLine.command)"
 }
@@ -348,22 +489,19 @@ if (-not (Confirm-Step 'Continue with the installation?')) {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Install
+# 6. Install
 # ---------------------------------------------------------------------------
 if (-not (Test-Path $claudeDir)) { New-Item -ItemType Directory -Path $claudeDir | Out-Null }
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText($statusLinePath, $StatusLineContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($statusLinePath, $content, $utf8NoBom)
 
-if (-not $settings) { $settings = New-Object PSObject }
-$statusLine = [pscustomobject]@{ type = 'command'; command = $command }
-$settings | Add-Member -NotePropertyName statusLine -NotePropertyValue $statusLine -Force
-[System.IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 100), $utf8NoBom)
+[System.IO.File]::WriteAllText($settingsPath, $newSettings, $utf8NoBom)
 
 Write-Ok 'Files written.'
 
 # ---------------------------------------------------------------------------
-# 5. Verify
+# 7. Verify
 # ---------------------------------------------------------------------------
 Write-Host ''
 Write-Info 'Checking the installed status line:'

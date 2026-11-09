@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compare:
+    name: compare (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux: gawk and pwsh; macOS: BSD awk and pwsh; Windows: Git Bash and Windows PowerShell 5.1
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Status line output (bash and PowerShell)
+        shell: bash
+        run: bash tests/compare.sh
+
+      # mawk is the default awk on Debian and Ubuntu desktops
+      - name: Status line output with mawk
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get install -y mawk
+          mkdir -p "$RUNNER_TEMP/mawk-bin"
+          ln -s "$(command -v mawk)" "$RUNNER_TEMP/mawk-bin/awk"
+          PATH="$RUNNER_TEMP/mawk-bin:$PATH" bash tests/compare.sh

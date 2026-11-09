@@ -1,0 +1,1 @@
+{"session_id":"66666666","model":{"display_name":"A\u001b[31mB\u009bC"},"workspace":{"current_dir":"/tmp/x\u001b]0;pwned\u0007y\nsession_id=evil"},"context_window":{"context_window_size":200000,"current_usage":{"input_tokens":5000,"cache_read_input_tokens":20000,"cache_creation_input_tokens":3000}}}
