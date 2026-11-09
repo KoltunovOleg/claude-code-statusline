@@ -1,8 +1,10 @@
-# Claude Code status line installer (Windows, macOS, Linux)
+# Claude Code status line installer for Windows (PowerShell).
 #
-# Windows:        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-statusline.ps1
-# macOS / Linux:  pwsh -NoProfile -File ./install-statusline.ps1
-#                 (install PowerShell first on macOS: brew install powershell)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-statusline.ps1
+#
+# On macOS and Linux use install.sh instead (bash, nothing to install).
+# This script also runs there under PowerShell 7 if you already have it:
+#   pwsh -NoProfile -File ./install-statusline.ps1
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
