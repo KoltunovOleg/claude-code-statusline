@@ -15,6 +15,10 @@ cat <<'STATUSLINE_EOF'
 # Reads the session JSON from stdin and prints two colored lines.
 # No dependencies beyond bash, sed, awk and (optionally) git.
 
+# Options (set by the installer)
+cwd_own_line=0   # 1: show the folder on a third line
+max_branch=0     # above 0: shorten longer git branch names to this length
+
 input=$(cat)
 [ -z "${input//[[:space:]]/}" ] && exit 0
 
@@ -67,6 +71,8 @@ folder=$(basename "$cwd")
 tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
 
 branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
+# Long branch names push the last fields off screen, so keep the start only
+[ "$max_branch" -gt 0 ] && [ ${#branch} -gt "$max_branch" ] && branch="${branch:0:max_branch-1}…"
 
 # --- Cost of the last turn (from the previous total) ------------------------
 prev_cost=""
@@ -116,7 +122,7 @@ LC_ALL=C awk \
   -v effort="$effort" -v model="$model" -v folder="$folder" -v branch="$branch" -v sid="$sid" \
   -v total="${total_cost:-0}" -v last_turn="${last_turn_cost:-0}" -v prev="$prev_cost" \
   -v in_tok="${in_tok:-0}" -v cread="${cache_read:-0}" -v cnew="${cache_new:-0}" -v ctx_size="${ctx_size:-0}" \
-  -v duration="$duration" -v last_api="$last_api" \
+  -v duration="$duration" -v last_api="$last_api" -v cwd_own_line="$cwd_own_line" \
   -v pc_warm="$pc_warm" -v pc_until="$pc_until" -v pc_ttl="$pc_ttl" -v pc_obs="$pc_obs" '
 function rgb(r, g, b) { return sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 function tint(r, g, b) { return rgb(int(r*0.35 + 30*0.65 + 0.5), int(g*0.35 + 37*0.65 + 0.5), int(b*0.35 + 48*0.65 + 0.5)) }
@@ -177,7 +183,8 @@ BEGIN {
   print join(l1, n)
 
   n = 0
-  l2[++n] = magenta "cwd:" folder reset
+  cwd_part = magenta "cwd:" folder reset
+  if (cwd_own_line != 1) l2[++n] = cwd_part
   if (branch != "") l2[++n] = yellow "git:" branch reset
   l2[++n] = gray "sid:" short reset
   l2[++n] = gray "time: " dur reset
@@ -192,9 +199,17 @@ BEGIN {
     } else if (pc_warm == "false") l2[++n] = yellow "cache cold" reset
   }
   print join(l2, n)
+  if (cwd_own_line == 1) print cwd_part
 }'
 STATUSLINE_EOF
 }
+
+# Status line script with the chosen options filled in: render_statusline <cwd_own_line> <max_branch>
+render_statusline() {
+  write_statusline | sed -e "s/^cwd_own_line=0 /cwd_own_line=$1 /" -e "s/^max_branch=0 /max_branch=$2 /"
+}
+
+yes_no() { [ "$1" != 0 ] && echo yes || echo no; }
 
 # --- Output helpers ------------------------------------------------------------
 c_info=$'\033[36m'; c_ok=$'\033[32m'; c_warn=$'\033[33m'; c_err=$'\033[31m'; c_off=$'\033[0m'
@@ -349,19 +364,38 @@ main() {
     fi
   fi
 
-  # 3. Preview
+  # 3. Option: folder on its own line
+  local cwd_own_line=0
+  echo
+  info 'Option 1 of 2: folder on a separate line'
+  echo '  By default the folder (cwd) is the first field of line 2. A long folder name'
+  echo '  can push the last fields (last, cache warm/cold) off screen.'
+  echo '  Moving it to a third line keeps line 2 short.'
+  confirm 'Show the folder on a third line?' && cwd_own_line=1
+
+  # 4. Option: shorten long git branch names
+  local branch_limit=24 max_branch=0
+  echo
+  info 'Option 2 of 2: shorten long git branch names'
+  echo "  Branch names longer than $branch_limit characters can push the last fields off screen."
+  echo "  If shortened, only the first $branch_limit characters are shown, ending with '…'."
+  confirm 'Shorten long git branch names?' && max_branch=$branch_limit
+
+  # 5. Preview
   echo
   info 'Preview of the status line (sample data, not your real session):'
   echo
   local preview
   preview=$(mktemp "${TMPDIR:-/tmp}/statusline-preview.XXXXXX") || { err 'Could not create a temp file.'; exit 1; }
-  write_statusline > "$preview"
+  render_statusline "$cwd_own_line" "$max_branch" > "$preview"
   run_sample "$preview" | sed 's/^/  /'
   rm -f "$preview"
 
   echo
   info 'What will be done:'
   echo "  - write file: $script_path"
+  echo "      folder on a third line: $(yes_no "$cwd_own_line")"
+  echo "      shorten long git branch names: $(yes_no "$max_branch")"
   echo "  - set statusLine in $settings_path to:"
   echo "      $command"
 
@@ -387,9 +421,9 @@ main() {
     exit 0
   fi
 
-  # 4. Install
+  # 6. Install
   mkdir -p "$claude_dir" || { err "Could not create $claude_dir"; exit 1; }
-  write_statusline > "$script_path" && chmod +x "$script_path" || { err "Could not write $script_path"; exit 1; }
+  render_statusline "$cwd_own_line" "$max_branch" > "$script_path" && chmod +x "$script_path" || { err "Could not write $script_path"; exit 1; }
 
   local new_settings
   if [ -s "$settings_path" ] && ! grep -q '[^[:space:]]' "$settings_path"; then
@@ -411,7 +445,7 @@ main() {
 
   ok 'Files written.'
 
-  # 5. Verify
+  # 7. Verify
   echo
   info 'Checking the installed status line:'
   echo

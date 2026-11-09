@@ -11,6 +11,10 @@ $ErrorActionPreference = 'Stop'
 # Embedded status line (written to ~/.claude/statusline.ps1)
 # ---------------------------------------------------------------------------
 $StatusLineContent = @'
+# Options (set by the installer)
+$CwdOnOwnLine = $false   # $true: show the folder on a third line
+$MaxBranch    = 0        # above 0: shorten longer git branch names to this length
+
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -99,6 +103,9 @@ try {
   if ($LASTEXITCODE -eq 0 -and $b) { $branch = "$b".Trim() }
 } catch {}
 
+# Long branch names push the last fields off screen, so keep the start only
+if ($MaxBranch -gt 0 -and $branch.Length -gt $MaxBranch) { $branch = $branch.Substring(0, $MaxBranch - 1) + [char]0x2026 }
+
 # 5. Context
 $u = $data.context_window.current_usage
 if (-not $u) { $u = $data.usage }
@@ -177,8 +184,10 @@ if ($sid -ne 'unknown' -and $apiTotal -gt 0) {
   }
 }
 
-# Line 2: cwd | git | sid | time | last
-$parts2 = @("${magenta}cwd:$folder$reset")
+# Line 2: cwd | git | sid | time | last (cwd goes to line 3 if $CwdOnOwnLine)
+$cwdPart = "${magenta}cwd:$folder$reset"
+$parts2 = @()
+if (-not $CwdOnOwnLine) { $parts2 += $cwdPart }
 if ($branch) { $parts2 += "${yellow}git:$branch$reset" }
 $parts2 += "${gray}sid:$shortSid$reset"
 $parts2 += "${gray}time: $durationStr$reset"
@@ -202,6 +211,7 @@ $line2 = $parts2 -join ' | '
 
 Write-Output $line1
 Write-Output $line2
+if ($CwdOnOwnLine) { Write-Output $cwdPart }
 '@
 
 # ---------------------------------------------------------------------------
@@ -227,6 +237,16 @@ function Format-Arg($value) {
   if ($value -match '\s') { return '"' + $value + '"' }
   return $value
 }
+
+# Status line script with the chosen options filled in
+function Get-StatusLineContent($cwdOnOwnLine, $maxBranch) {
+  $content = $StatusLineContent
+  if ($cwdOnOwnLine) { $content = $content.Replace('$CwdOnOwnLine = $false', '$CwdOnOwnLine = $true ') }
+  if ($maxBranch -gt 0) { $content = $content.Replace('$MaxBranch    = 0 ', '$MaxBranch    = ' + "$maxBranch".PadRight(2)) }
+  return $content
+}
+
+function Format-YesNo($value) { if ($value) { 'yes' } else { 'no' } }
 
 # PowerShell executable that runs this installer (pwsh or powershell)
 $PsExe = (Get-Process -Id $PID).Path
@@ -305,7 +325,29 @@ if (Test-Path $statusLinePath) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Preview
+# 3. Option: folder on its own line
+# ---------------------------------------------------------------------------
+Write-Host ''
+Write-Info 'Option 1 of 2: folder on a separate line'
+Write-Host '  By default the folder (cwd) is the first field of line 2. A long folder name'
+Write-Host '  can push the last fields (last, cache warm/cold) off screen.'
+Write-Host '  Moving it to a third line keeps line 2 short.'
+$cwdOnOwnLine = Confirm-Step 'Show the folder on a third line?'
+
+# ---------------------------------------------------------------------------
+# 4. Option: shorten long git branch names
+# ---------------------------------------------------------------------------
+$BranchLimit = 24
+Write-Host ''
+Write-Info 'Option 2 of 2: shorten long git branch names'
+Write-Host "  Branch names longer than $BranchLimit characters can push the last fields off screen."
+Write-Host "  If shortened, only the first $BranchLimit characters are shown, ending with '...'."
+$maxBranch = if (Confirm-Step 'Shorten long git branch names?') { $BranchLimit } else { 0 }
+
+$content = Get-StatusLineContent $cwdOnOwnLine $maxBranch
+
+# ---------------------------------------------------------------------------
+# 5. Preview
 # ---------------------------------------------------------------------------
 Write-Host ''
 Write-Info 'Preview of the status line (sample data, not your real session):'
@@ -313,7 +355,7 @@ Write-Host ''
 
 $previewFile = Join-Path ([System.IO.Path]::GetTempPath()) ('statusline-preview-' + [guid]::NewGuid().ToString('N') + '.ps1')
 try {
-  [System.IO.File]::WriteAllText($previewFile, $StatusLineContent, (New-Object System.Text.UTF8Encoding $false))
+  [System.IO.File]::WriteAllText($previewFile, $content, (New-Object System.Text.UTF8Encoding $false))
   Invoke-StatusLine $previewFile | ForEach-Object { Write-Host "  $_" }
 } finally {
   Remove-Item $previewFile -Force -ErrorAction SilentlyContinue
@@ -322,6 +364,8 @@ try {
 Write-Host ''
 Write-Info 'What will be done:'
 Write-Host "  - write file: $statusLinePath"
+Write-Host "      folder on a third line: $(Format-YesNo $cwdOnOwnLine)"
+Write-Host "      shorten long git branch names: $(Format-YesNo ($maxBranch -gt 0))"
 Write-Host "  - set statusLine in $settingsPath to:"
 Write-Host "      $command"
 
@@ -348,12 +392,12 @@ if (-not (Confirm-Step 'Continue with the installation?')) {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Install
+# 6. Install
 # ---------------------------------------------------------------------------
 if (-not (Test-Path $claudeDir)) { New-Item -ItemType Directory -Path $claudeDir | Out-Null }
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText($statusLinePath, $StatusLineContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($statusLinePath, $content, $utf8NoBom)
 
 if (-not $settings) { $settings = New-Object PSObject }
 $statusLine = [pscustomobject]@{ type = 'command'; command = $command }
@@ -363,7 +407,7 @@ $settings | Add-Member -NotePropertyName statusLine -NotePropertyValue $statusLi
 Write-Ok 'Files written.'
 
 # ---------------------------------------------------------------------------
-# 5. Verify
+# 7. Verify
 # ---------------------------------------------------------------------------
 Write-Host ''
 Write-Info 'Checking the installed status line:'
