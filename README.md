@@ -104,6 +104,16 @@ Some values also depend on the session:
 
 Remove the `statusLine` entry from `~/.claude/settings.json` (or restore your own backup) and delete `~/.claude/statusline.ps1` (Windows) or `~/.claude/statusline.sh` (macOS / Linux).
 
+## Tests
+
+The status line exists twice: in bash (inside `install.sh`) and in PowerShell (inside `install-statusline.ps1`). `tests/compare.sh` runs both on the JSON samples in `tests/fixtures` and checks that they print the expected lines and no stray control characters:
+
+```bash
+bash tests/compare.sh
+```
+
+It needs bash. PowerShell (`powershell` or `pwsh`) and gawk are used when installed. After an intended output change, run `bash tests/compare.sh --update` to rewrite the `.expected` files from the bash output, and review the diff before committing.
+
 ## License
 
 [MIT](LICENSE)
