@@ -140,7 +140,13 @@ if [ -z "$in_tok$cache_read$cache_new" ]; then
 fi
 # The session id becomes part of temp file names, so allow only id characters
 case "$sid" in *[!A-Za-z0-9-]*) sid="" ;; esac
-tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}
+# Temp files live in a private folder: in a shared /tmp another user could
+# otherwise create a symlink with the same name and redirect the writes.
+# If the folder is not ours, cost and timing are not tracked.
+tmp=${TMPDIR:-/tmp}; tmp="${tmp%/}/claude-statusline-$(id -u 2>/dev/null)"
+mkdir -m 700 "$tmp" 2>/dev/null
+state=$sid   # empty: do not use temp files
+{ [ -L "$tmp" ] || [ ! -d "$tmp" ] || [ ! -O "$tmp" ]; } && state=""
 
 branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
 # Long branch names push the last fields off screen, so keep the start only
@@ -148,7 +154,7 @@ branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
 # --- Cost of the last turn (from the previous total) ------------------------
 prev_cost=""
-if [ -n "$sid" ]; then
+if [ -n "$state" ]; then
   cost_file="$tmp/claude_cost_$sid.txt"
   [ -f "$cost_file" ] && prev_cost=$(cat "$cost_file" 2>/dev/null)
   printf '%s' "${total_cost:-0}" > "$cost_file" 2>/dev/null
@@ -156,7 +162,7 @@ fi
 
 # --- Session duration --------------------------------------------------------
 duration=0
-if [ -n "$sid" ]; then
+if [ -n "$state" ]; then
   time_file="$tmp/claude_session_$sid.time"
   now=$(date +%s)
   start=""
@@ -167,7 +173,7 @@ fi
 
 # --- Last request duration (from cumulative API time) ------------------------
 last_api=0
-if [ -n "$sid" ] && [ -n "$api_ms" ]; then
+if [ -n "$state" ] && [ -n "$api_ms" ]; then
   api_file="$tmp/claude_api_$sid.txt"
   saved=""
   [ -f "$api_file" ] && saved=$(cat "$api_file" 2>/dev/null)
@@ -325,7 +331,7 @@ confirm() {
 run_sample() {
   local script=$1 sid tmpdir
   sid="sample$$$(date +%s)"
-  tmpdir=${TMPDIR:-/tmp}; tmpdir=${tmpdir%/}
+  tmpdir=${TMPDIR:-/tmp}; tmpdir="${tmpdir%/}/claude-statusline-$(id -u 2>/dev/null)"
   printf '{"session_id":"%s","effort":{"level":"medium"},"model":{"display_name":"Sonnet 4.6"},"workspace":{"current_dir":"%s"},"cost":{"total_cost_usd":0.12,"total_api_duration_ms":14200},"context_window":{"context_window_size":200000,"current_usage":{"input_tokens":5000,"cache_read_input_tokens":20000,"cache_creation_input_tokens":3000}}}' \
     "$sid" "$PWD" | bash "$script"
   rm -f "$tmpdir"/claude_*"$sid"* 2>/dev/null
@@ -338,7 +344,8 @@ run_sample() {
 # Exit code 2 means the file does not look like a JSON object we can edit safely.
 settings_edit() {
   local mode=$1 file=$2 value=${3:-}
-  LC_ALL=C awk -v mode="$mode" -v value="$value" '
+  # The value goes through the environment, not awk -v, because -v turns \" into "
+  SE_VALUE=$value LC_ALL=C awk -v mode="$mode" '
     function scan(s,   i, c, n, depth, instr, esc) {
       # Sets globals: OPEN, CLOSE (outer braces), KEY (position of top-level "statusLine"), BAD
       OPEN = 0; CLOSE = 0; KEY = 0; BAD = 0; depth = 0; instr = 0; esc = 0; n = length(s)
@@ -391,6 +398,7 @@ settings_edit() {
     }
     { S = S $0 "\n" }
     END {
+      value = ENVIRON["SE_VALUE"]
       scan(S)
       if (BAD) exit 2
       if (KEY) {
@@ -431,8 +439,12 @@ main() {
 
   local script_path="$claude_dir/statusline.sh"
   local settings_path="$claude_dir/settings.json"
+  # Claude Code runs the command in a shell, so quote the path unless it only has
+  # plain characters (single quotes, so $, ` and ; in the path stay literal)
   local command="bash $script_path"
-  case "$script_path" in *[[:space:]]*) command="bash \"$script_path\"" ;; esac
+  case "$script_path" in
+    *[!A-Za-z0-9_./-]*) command="bash '$(printf '%s' "$script_path" | sed "s/'/'\\\\''/g")'" ;;
+  esac
   # JSON-escape the command (backslashes and quotes)
   local command_json=${command//\\/\\\\}
   command_json=${command_json//\"/\\\"}
@@ -528,6 +540,12 @@ main() {
   local tmp_settings
   tmp_settings=$(mktemp "$claude_dir/settings.json.XXXXXX") || { err 'Could not create a temp file.'; exit 1; }
   printf '%s\n' "$new_settings" > "$tmp_settings"
+  # Replace settings.json only if the new text still parses and has the new command
+  if ! settings_edit get "$tmp_settings" >/dev/null || ! grep -qF "\"command\": \"$command_json\"" "$tmp_settings"; then
+    err "Could not update $settings_path. The status line file was written, but settings.json was not changed."
+    rm -f "$tmp_settings"
+    exit 1
+  fi
   [ -f "$settings_path" ] && chmod "$(stat -c %a "$settings_path" 2>/dev/null || stat -f %Lp "$settings_path")" "$tmp_settings" 2>/dev/null
   mv "$tmp_settings" "$settings_path" || { err "Could not write $settings_path"; rm -f "$tmp_settings"; exit 1; }
 

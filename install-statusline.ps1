@@ -56,6 +56,15 @@ $tmp = [System.IO.Path]::GetTempPath()
 $sid = if ("$($data.session_id)" -match '^[A-Za-z0-9-]+$') { [string]$data.session_id } else { 'unknown' }
 $shortSid = if ($sid -ne 'unknown') { $sid.Substring(0, [math]::Min(6, $sid.Length)) } else { 'none' }
 
+# On macOS and Linux the temp folder is shared, so another user could create a
+# symlink with the same name and redirect the writes. Use a private folder there,
+# and if it is not ours, do not track cost and timing. (%TEMP% on Windows is per user.)
+$useTemp = $sid -ne 'unknown'
+if ($useTemp -and -not (($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows)) {
+  $tmp = & sh -c 'd="${1%/}/claude-statusline-$(id -u)"; mkdir -m 700 "$d" 2>/dev/null; [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] && printf %s "$d"' sh $tmp
+  if (-not $tmp) { $useTemp = $false }
+}
+
 # 2. Cost (total + last turn)
 [double]$totalCost = 0
 if ($data.cost.total_cost_usd) { $totalCost = [double]$data.cost.total_cost_usd }
@@ -65,31 +74,31 @@ elseif ($data.cost.totalCost) { $totalCost = [double]$data.cost.totalCost }
 if ($data.cost.last_turn_cost_usd) { $lastCost = [double]$data.cost.last_turn_cost_usd }
 elseif ($data.cost.lastTurnCost) { $lastCost = [double]$data.cost.lastTurnCost }
 
-if ($sid -ne 'unknown') {
+if ($useTemp) {
   $costFile = Join-Path $tmp "claude_cost_$sid.txt"
   $prev = $totalCost
-  if (Test-Path $costFile) {
+  if (Test-Path -LiteralPath $costFile) {
     [double]$p = 0
-    $txt = "$(Get-Content $costFile -Raw)".Trim()
+    $txt = "$(Get-Content -LiteralPath $costFile -Raw)".Trim()
     if ([double]::TryParse($txt, [System.Globalization.NumberStyles]::Float, $inv, [ref]$p) -and $p -ne 0) { $prev = $p }
   }
   if ($lastCost -eq 0 -and $totalCost -ge $prev) { $lastCost = $totalCost - $prev }
-  Set-Content -Path $costFile -Value $totalCost.ToString($inv) -NoNewline
+  Set-Content -LiteralPath $costFile -Value $totalCost.ToString($inv) -NoNewline
 }
 $costDisplay = '$' + $totalCost.ToString('0.00', $inv) + ' (+$' + $lastCost.ToString('0.000', $inv) + ')'
 
 # 3. Session duration
 $durationStr = '0s'
-if ($sid -ne 'unknown') {
+if ($useTemp) {
   $timeFile = Join-Path $tmp "claude_session_$sid.time"
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $start = $now
-  if (Test-Path $timeFile) {
+  if (Test-Path -LiteralPath $timeFile) {
     [long]$st = 0
-    $txt = "$(Get-Content $timeFile -Raw)".Trim()
+    $txt = "$(Get-Content -LiteralPath $timeFile -Raw)".Trim()
     if ([long]::TryParse($txt, [ref]$st) -and $st -ne 0) { $start = $st }
   } else {
-    Set-Content -Path $timeFile -Value "$now" -NoNewline
+    Set-Content -LiteralPath $timeFile -Value "$now" -NoNewline
   }
   $diff = [long][math]::Floor(($now - $start) / 1000)
   $h = [math]::Floor($diff / 3600)
@@ -169,18 +178,18 @@ $line1 = $parts1 -join ' | '
 # Last request duration (from cumulative API time)
 $lastReqStr = ''
 $apiTotal = [long]$data.cost.total_api_duration_ms
-if ($sid -ne 'unknown' -and $apiTotal -gt 0) {
+if ($useTemp -and $apiTotal -gt 0) {
   $apiFile = Join-Path $tmp "claude_api_$sid.txt"
   [long]$prevApi = 0
   [long]$lastApi = 0
-  if (Test-Path $apiFile) {
-    $vals = "$(Get-Content $apiFile -Raw)".Trim() -split ';'
+  if (Test-Path -LiteralPath $apiFile) {
+    $vals = "$(Get-Content -LiteralPath $apiFile -Raw)".Trim() -split ';'
     [long]::TryParse($vals[0], [ref]$prevApi) | Out-Null
     if ($vals.Count -gt 1) { [long]::TryParse($vals[1], [ref]$lastApi) | Out-Null }
   }
   if ($apiTotal -gt $prevApi) {
     $lastApi = $apiTotal - $prevApi
-    Set-Content -Path $apiFile -Value "$apiTotal;$lastApi" -NoNewline
+    Set-Content -LiteralPath $apiFile -Value "$apiTotal;$lastApi" -NoNewline
   }
   if ($lastApi -gt 0) {
     $secs = $lastApi / 1000
@@ -242,10 +251,13 @@ function Stop-Install($msg) {
   exit 0
 }
 
-# Wrap a path in double quotes if it contains spaces
+# Quote a path for the shell that runs the status line command, unless it only
+# has plain characters. Single quotes on macOS and Linux keep $, ` and ; literal.
+# Windows uses double quotes, which both cmd and bash accept.
 function Format-Arg($value) {
-  if ($value -match '\s') { return '"' + $value + '"' }
-  return $value
+  if ($value -match '^[A-Za-z0-9_./:\\-]+$') { return $value }
+  if ($OnWindows) { return '"' + $value + '"' }
+  return "'" + $value.Replace("'", "'\''") + "'"
 }
 
 # Status line script with the chosen options filled in
@@ -354,7 +366,8 @@ function Invoke-StatusLine($scriptPath) {
 
   # Remove temp files the status line created for the sample session
   $tmp = [System.IO.Path]::GetTempPath()
-  Get-ChildItem -Path $tmp -Filter "claude_*$sid*" -ErrorAction SilentlyContinue |
+  if (-not $OnWindows) { $tmp = Join-Path $tmp "claude-statusline-$(& id -u)" }
+  Get-ChildItem -LiteralPath $tmp -Filter "claude_*$sid*" -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
   return $output
@@ -496,7 +509,19 @@ if (-not (Test-Path $claudeDir)) { New-Item -ItemType Directory -Path $claudeDir
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($statusLinePath, $content, $utf8NoBom)
 
-[System.IO.File]::WriteAllText($settingsPath, $newSettings, $utf8NoBom)
+# Write to a temp file first and then swap it in, so an interrupted install
+# cannot leave a half-written settings.json
+$tmpSettings = Join-Path $claudeDir ('settings.json.' + [guid]::NewGuid().ToString('N') + '.tmp')
+try {
+  [System.IO.File]::WriteAllText($tmpSettings, $newSettings, $utf8NoBom)
+  if (Test-Path -LiteralPath $settingsPath) {
+    [System.IO.File]::Replace($tmpSettings, $settingsPath, [NullString]::Value)
+  } else {
+    [System.IO.File]::Move($tmpSettings, $settingsPath)
+  }
+} finally {
+  Remove-Item -LiteralPath $tmpSettings -Force -ErrorAction SilentlyContinue
+}
 
 Write-Ok 'Files written.'
 

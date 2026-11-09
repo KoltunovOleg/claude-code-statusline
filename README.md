@@ -98,7 +98,7 @@ Some values also depend on the session:
 - `medium` (effort) appears only when Claude Code reports an effort level.
 - `cache` shows `r:0` on the first request of a session, because everything is being written to the cache for the first time.
 - `last` appears after the first model request.- `cache warm` / `cache cold` needs Claude Code v2.1.251 or later and appears after the first model request. Claude Code refreshes the status line when the cache expires, so it switches to `cold` on its own.
-- Cost and timing are tracked with small files in the system temp folder (`claude_*`), which the OS cleans up over time.
+- Cost and timing are tracked with small files (`claude_*`) in the system temp folder, which the OS cleans up over time. On macOS and Linux they go into a private subfolder, `claude-statusline-<uid>`, so other users of the machine cannot tamper with them.
 
 ## Uninstall
 
